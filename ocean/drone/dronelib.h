@@ -42,7 +42,7 @@
 #define RING_RADIUS 0.5f
 #define V_TARGET 0.05f
 
-#define DRONE_OBS_SIZE 23
+#define DRONE_OBS_SIZE 28
 
 // Core Parameters
 #define DT 0.002f // 500 Hz
@@ -238,7 +238,7 @@ static inline void init_drone(Drone* drone, unsigned int* rng, float dr) {
 
 // observations
 
-void compute_drone_observations(Drone* agent, float* observations, bool is_race) {
+void compute_drone_observations(Drone* agent, float* observations, int task, Vec3 tower_pos, float tower_radius) {
     int idx = 0;
     Quat q = agent->state.quat;
     Quat q_inv = quat_inverse(q);
@@ -278,6 +278,26 @@ void compute_drone_observations(Drone* agent, float* observations, bool is_race)
     observations[idx++] = normal_body.y;
     observations[idx++] = normal_body.z;
 
-    observations[idx++] = is_race ? 0.0f : 1.0f;
-    observations[idx++] = is_race ? 1.0f : 0.0f;
+    // Obstacle observations in body frame (4 features)
+    if (task == 5) { // TASK_AVOID
+        Vec3 tower_closest = (Vec3){tower_pos.x, tower_pos.y, agent->state.pos.z};
+        Vec3 to_tower_world = sub3(tower_closest, agent->state.pos);
+        Vec3 to_tower_body = quat_rotate(q_inv, to_tower_world);
+        observations[idx++] = tanhf(to_tower_body.x * 0.1f);
+        observations[idx++] = tanhf(to_tower_body.y * 0.1f);
+        observations[idx++] = tanhf(to_tower_body.z * 0.1f);
+        float d_xy = hypotf(to_tower_world.x, to_tower_world.y);
+        float dist_to_surface = d_xy - (tower_radius + 0.15f);
+        observations[idx++] = tanhf(dist_to_surface * 0.5f);
+    } else {
+        observations[idx++] = 0.0f;
+        observations[idx++] = 0.0f;
+        observations[idx++] = 0.0f;
+        observations[idx++] = 1.0f;
+    }
+
+    // 3-way one-hot task indicator (3 features)
+    observations[idx++] = (task == 0 || task == 2 || task == 3 || task == 4) ? 1.0f : 0.0f; // hover family
+    observations[idx++] = (task == 1) ? 1.0f : 0.0f; // race
+    observations[idx++] = (task == 5) ? 1.0f : 0.0f; // avoid
 }

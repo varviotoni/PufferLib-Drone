@@ -34,9 +34,10 @@ typedef enum {
     TASK_SPHERE = 2,
     TASK_CUBE = 3,
     TASK_FLAG = 4,
+    TASK_AVOID = 5,
 } TaskType;
 
-#define NUM_TASKS 5
+#define NUM_TASKS 6
 
 typedef struct {
     float dist;
@@ -103,6 +104,14 @@ struct Env {
     float ring_reward;
     float race_alpha_dist;
     int race_horizon;
+    float avoid_tower_radius;
+    float avoid_collision_penalty;
+    float avoid_safety_margin;
+    float avoid_alpha_proximity;
+    float avoid_target_dist;
+    float avoid_alpha_dist;
+    float avoid_alpha_hover;
+    int avoid_horizon;
 };
 
 // Task sampling fractions (set in puf_init for puf_log episode_frac keys)
@@ -147,10 +156,13 @@ void reset_agent(DroneEnv* env, int idx) {
 }
 
 void compute_observations(DroneEnv* env) {
-    bool is_race = (env->task == TASK_RACE);
-    for (int i = 0; i < env->num_agents; i++)
+    AvoidState* avoid_state = (env->task == TASK_AVOID && env->task_state) ? (AvoidState*)env->task_state : NULL;
+    for (int i = 0; i < env->num_agents; i++) {
+        Vec3 tower_pos = (avoid_state) ? avoid_state->towers[i].pos : (Vec3){0, 0, 0};
+        float tower_rad = (avoid_state) ? avoid_state->towers[i].radius : 0.0f;
         compute_drone_observations(&env->drones[i],
-            env->agents[i].observations, is_race);
+            env->agents[i].observations, (int)env->task, tower_pos, tower_rad);
+    }
 }
 
 // Contiguous action buffer base (pufferl/puffercpu layout agents[i] stride NUM_ATNS)
@@ -249,6 +261,17 @@ static void drone_fill_task_config(DroneEnv* env) {
         cfg->alpha_dist = env->race_alpha_dist;
         cfg->horizon = env->race_horizon;
         env->task_config = cfg;
+    } else if (env->task == TASK_AVOID) {
+        AvoidConfig* cfg = (AvoidConfig*)calloc(1, sizeof(AvoidConfig));
+        cfg->tower_radius = env->avoid_tower_radius;
+        cfg->collision_penalty = env->avoid_collision_penalty;
+        cfg->safety_margin = env->avoid_safety_margin;
+        cfg->alpha_proximity = env->avoid_alpha_proximity;
+        cfg->target_dist = env->avoid_target_dist;
+        cfg->alpha_dist = env->avoid_alpha_dist;
+        cfg->alpha_hover = env->avoid_alpha_hover;
+        cfg->horizon = env->avoid_horizon;
+        env->task_config = cfg;
     } else {
         HoverConfig* cfg = (HoverConfig*)calloc(1, sizeof(HoverConfig));
         cfg->target_dist = env->hover_target_dist;
@@ -292,6 +315,7 @@ void puf_init(Env* env, Dict* kwargs) {
     task_fracs[TASK_SPHERE] = dict_get(kwargs, "sphere_frac");
     task_fracs[TASK_CUBE] = dict_get(kwargs, "cube_frac");
     task_fracs[TASK_FLAG] = dict_get(kwargs, "flag_frac");
+    task_fracs[TASK_AVOID] = dict_get(kwargs, "avoid_frac");
 
     float total = 0.0f;
     for (int t = 0; t < NUM_TASKS; t++) total += task_fracs[t];
@@ -318,6 +342,15 @@ void puf_init(Env* env, Dict* kwargs) {
     env->ring_reward = dict_get(kwargs, "ring_reward");
     env->race_alpha_dist = dict_get(kwargs, "race_alpha_dist");
     env->race_horizon = (int)dict_get(kwargs, "race_horizon");
+
+    env->avoid_tower_radius = dict_get(kwargs, "tower_radius");
+    env->avoid_collision_penalty = dict_get(kwargs, "collision_penalty");
+    env->avoid_safety_margin = dict_get(kwargs, "safety_margin");
+    env->avoid_alpha_proximity = dict_get(kwargs, "alpha_proximity");
+    env->avoid_target_dist = dict_get(kwargs, "hover_target_dist");
+    env->avoid_alpha_dist = dict_get(kwargs, "hover_alpha_dist");
+    env->avoid_alpha_hover = dict_get(kwargs, "alpha_hover");
+    env->avoid_horizon = (int)dict_get(kwargs, "hover_horizon");
 
     drone_fill_task_config(env);
 
@@ -398,6 +431,16 @@ void puf_log(Log* log, Dict* out) {
         dict_set(out, "flag/ema_omega", task_avg(f->keys[2], f->n));
         dict_set(out, "flag/oob", task_avg(f->keys[3], f->n));
         dict_set(out, "flag/episode_frac", f->n);
+    }
+    if (log->task[TASK_AVOID].n > 0.0f || (first && task_fracs[TASK_AVOID] > 0.0f)) {
+        TaskLog* a = &log->task[TASK_AVOID];
+        dict_set(out, "avoid/perf", task_avg(a->perf, a->n));
+        dict_set(out, "avoid/score", task_avg(a->score, a->n));
+        dict_set(out, "avoid/ema_dist", task_avg(a->keys[0], a->n));
+        dict_set(out, "avoid/ema_vel", task_avg(a->keys[1], a->n));
+        dict_set(out, "avoid/ema_omega", task_avg(a->keys[2], a->n));
+        dict_set(out, "avoid/collisions", task_avg(a->keys[3], a->n));
+        dict_set(out, "avoid/episode_frac", a->n);
     }
 
     first = 0;

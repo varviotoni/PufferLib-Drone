@@ -469,11 +469,24 @@ void DrawDronePrimitive(Client* client, Drone* agent, float* actions, Color body
 
 // Task-specific overlays
 static void render_task(DroneEnv* env, Client* client) {
-    if (env->task != TASK_RACE) return;
-    RaceConfig* cfg = (RaceConfig*)env->task_config;
-    RaceState* state = (RaceState*)env->task_state;
-    for (int i = 0; i < cfg->max_rings; i++)
-        DrawRing3D(state->ring_buffer[i], 0.1f, GREEN, BLUE);
+    if (env->task == TASK_RACE) {
+        RaceConfig* cfg = (RaceConfig*)env->task_config;
+        RaceState* state = (RaceState*)env->task_state;
+        for (int i = 0; i < cfg->max_rings; i++)
+            DrawRing3D(state->ring_buffer[i], 0.1f, GREEN, BLUE);
+    } else if (env->task == TASK_AVOID && env->task_state != NULL) {
+        AvoidState* state = (AvoidState*)env->task_state;
+        int sel = client->selected_drone;
+        if (sel >= 0 && sel < env->num_agents) {
+            TowerObstacle t = state->towers[sel];
+            DrawCylinderEx((Vector3){t.pos.x, t.pos.y, t.z_min},
+                           (Vector3){t.pos.x, t.pos.y, t.z_max},
+                           t.radius, t.radius, 32, (Color){200, 45, 45, 180});
+            DrawCylinderWiresEx((Vector3){t.pos.x, t.pos.y, t.z_min},
+                                (Vector3){t.pos.x, t.pos.y, t.z_max},
+                                t.radius, t.radius, 16, MAROON);
+        }
+    }
 }
 
 void puf_render(DroneEnv* env) {
@@ -701,14 +714,26 @@ void puf_render(DroneEnv* env) {
         DrawText(TextFormat("Episode Return: %.4f", agent->episode_return), 10, y, 18, WHITE);
         y += 20;
         DrawText(TextFormat("Episode Length: %d", agent->episode_length), 10, y, 18, WHITE);
-        y += 30;
+        y += 20;
+        if (env->task == TASK_AVOID && env->task_state != NULL) {
+            AvoidState* astate = (AvoidState*)env->task_state;
+            int sel = client->selected_drone;
+            if (sel >= 0 && sel < env->num_agents) {
+                DrawText(TextFormat("Collisions: %.0f", astate->collisions[sel]), 10, y, 18, astate->collided[sel] ? RED : WHITE);
+                y += 20;
+                float d_xy = hypotf(agent->state.pos.x - astate->towers[sel].pos.x, agent->state.pos.y - astate->towers[sel].pos.y);
+                DrawText(TextFormat("Dist to Tower: %.2f m", d_xy), 10, y, 18, WHITE);
+                y += 20;
+            }
+        }
+        y += 10;
     }
 
     DrawText("Left click + drag: Rotate camera", 10, y, 16, LIGHTGRAY);
     y += 18;
     DrawText("Mouse wheel: Zoom in/out", 10, y, 16, LIGHTGRAY);
     y += 18;
-    DrawText("Tab: Next task (hover/race/sphere/cube/flag)", 10, y, 16, LIGHTGRAY);
+    DrawText("Tab: Next task (hover/race/sphere/cube/flag/avoid)", 10, y, 16, LIGHTGRAY);
     y += 18;
     DrawText(TextFormat("I: Inspect mode [%s]", inspect_mode ? "ON" : "OFF"), 10, y, 16,
              inspect_mode ? PUFF_GREEN : LIGHTGRAY);
