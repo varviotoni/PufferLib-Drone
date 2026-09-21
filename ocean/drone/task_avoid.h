@@ -1,7 +1,7 @@
 #pragma once
 #include "drone.h"
 
-#define NUM_AVOID_TOWERS 10
+#define NUM_AVOID_TOWERS 11
 
 #define AVOID_SCORE_DIST_SCALE 0.01f
 #define AVOID_SCORE_VEL_SCALE 0.01f
@@ -16,6 +16,7 @@ typedef struct {
 
 typedef struct {
     float tower_radius;
+    float center_tower_radius;
     float circle_radius;
     float collision_penalty;
     float safety_margin;
@@ -46,17 +47,26 @@ static void avoid_init(DroneEnv* env) {
     float c_radius = (cfg->circle_radius > 0.1f) ? cfg->circle_radius : 3.0f;
     float t_radius = (cfg->tower_radius > 0.05f) ? cfg->tower_radius : 0.45f;
 
-    // Place 10 towers in a circle formation in the middle of the arena
-    for (int k = 0; k < NUM_AVOID_TOWERS; k++) {
-        float angle = (2.0f * (float)M_PI * (float)k) / (float)NUM_AVOID_TOWERS;
-        state->towers[k].pos = (Vec3){
+    float center_r = (cfg->center_tower_radius > 0.05f) ? cfg->center_tower_radius : 0.8f;
+
+    // Central tower right in the middle at (0, 0)
+    state->towers[0].pos = (Vec3){0.0f, 0.0f, 0.0f};
+    state->towers[0].radius = center_r;
+    state->towers[0].z_min = -GRID_Z;
+    state->towers[0].z_max = GRID_Z;
+
+    // 10 surrounding towers in a circular ring formation
+    int num_ring_towers = 10;
+    for (int k = 0; k < num_ring_towers; k++) {
+        float angle = (2.0f * (float)M_PI * (float)k) / (float)num_ring_towers;
+        state->towers[k + 1].pos = (Vec3){
             c_radius * cosf(angle),
             c_radius * sinf(angle),
             0.0f
         };
-        state->towers[k].radius = t_radius;
-        state->towers[k].z_min = -GRID_Z;
-        state->towers[k].z_max = GRID_Z;
+        state->towers[k + 1].radius = t_radius;
+        state->towers[k + 1].z_min = -GRID_Z;
+        state->towers[k + 1].z_max = GRID_Z;
     }
 
     state->collided = (bool*)calloc(env->num_agents, sizeof(bool));

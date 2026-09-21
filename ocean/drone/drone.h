@@ -105,6 +105,7 @@ struct Env {
     float race_alpha_dist;
     int race_horizon;
     float avoid_tower_radius;
+    float avoid_center_tower_radius;
     float avoid_circle_radius;
     float avoid_collision_penalty;
     float avoid_safety_margin;
@@ -279,6 +280,7 @@ static void drone_fill_task_config(DroneEnv* env) {
     } else if (env->task == TASK_AVOID) {
         AvoidConfig* cfg = (AvoidConfig*)calloc(1, sizeof(AvoidConfig));
         cfg->tower_radius = env->avoid_tower_radius;
+        cfg->center_tower_radius = env->avoid_center_tower_radius;
         cfg->circle_radius = env->avoid_circle_radius;
         cfg->collision_penalty = env->avoid_collision_penalty;
         cfg->safety_margin = env->avoid_safety_margin;
@@ -360,6 +362,7 @@ void puf_init(Env* env, Dict* kwargs) {
     env->race_horizon = (int)dict_get(kwargs, "race_horizon");
 
     env->avoid_tower_radius = dict_get(kwargs, "tower_radius");
+    env->avoid_center_tower_radius = dict_get(kwargs, "center_tower_radius");
     env->avoid_circle_radius = dict_get(kwargs, "circle_radius");
     env->avoid_collision_penalty = dict_get(kwargs, "collision_penalty");
     env->avoid_safety_margin = dict_get(kwargs, "safety_margin");
