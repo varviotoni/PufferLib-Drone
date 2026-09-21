@@ -84,13 +84,17 @@ static void avoid_close(DroneEnv* env) {
     free(env->task_config);
 }
 
-// Reset: spawn drone outside the circle, goal placed either across the circle or inside it
+// Reset: spawn drone outside the column ring, goal always on opposite side of column ring
 static void avoid_reset(DroneEnv* env, Drone* agent, int idx) {
+    AvoidConfig* cfg = (AvoidConfig*)env->task_config;
     AvoidState* state = (AvoidState*)env->task_state;
 
-    // Drone spawns outside the circle at radius ~4.2m
+    float ring_outer = (cfg->circle_radius > 0.1f ? cfg->circle_radius : 3.0f) +
+                       (cfg->tower_radius > 0.05f ? cfg->tower_radius : 0.45f);
+
+    // Drone spawns outside the column ring
     float phi = rndf(0.0f, 2.0f * (float)M_PI, &env->rng);
-    float r_start = rndf(3.8f, 5.2f, &env->rng);
+    float r_start = rndf(ring_outer + 0.8f, ring_outer + 2.2f, &env->rng);
     float z_start = rndf(-MARGIN_Z * 0.6f, MARGIN_Z * 0.6f, &env->rng);
 
     agent->state.pos = (Vec3){
@@ -99,26 +103,16 @@ static void avoid_reset(DroneEnv* env, Drone* agent, int idx) {
         clampf(z_start, -MARGIN_Z, MARGIN_Z),
     };
 
-    // Goal: 80% on opposite side of circle (requiring traversing the pillar ring), 20% in center
-    float goal_mode = rndf(0.0f, 1.0f, &env->rng);
+    // Goal is placed at the opposite side of the column ring
+    float phi_goal = phi + (float)M_PI + rndf(-0.35f, 0.35f, &env->rng);
+    float r_goal = rndf(ring_outer + 0.8f, ring_outer + 2.2f, &env->rng);
     float z_goal = rndf(-MARGIN_Z * 0.6f, MARGIN_Z * 0.6f, &env->rng);
-    if (goal_mode < 0.8f) {
-        float phi_goal = phi + (float)M_PI + rndf(-0.5f, 0.5f, &env->rng);
-        float r_goal = rndf(3.8f, 5.2f, &env->rng);
-        agent->target->pos = (Vec3){
-            clampf(r_goal * cosf(phi_goal), -MARGIN_X, MARGIN_X),
-            clampf(r_goal * sinf(phi_goal), -MARGIN_Y, MARGIN_Y),
-            clampf(z_goal, -MARGIN_Z, MARGIN_Z),
-        };
-    } else {
-        float phi_goal = rndf(0.0f, 2.0f * (float)M_PI, &env->rng);
-        float r_goal = rndf(0.0f, 1.2f, &env->rng);
-        agent->target->pos = (Vec3){
-            r_goal * cosf(phi_goal),
-            r_goal * sinf(phi_goal),
-            clampf(z_goal, -MARGIN_Z, MARGIN_Z),
-        };
-    }
+
+    agent->target->pos = (Vec3){
+        clampf(r_goal * cosf(phi_goal), -MARGIN_X, MARGIN_X),
+        clampf(r_goal * sinf(phi_goal), -MARGIN_Y, MARGIN_Y),
+        clampf(z_goal, -MARGIN_Z, MARGIN_Z),
+    };
 
     agent->target->vel = (Vec3){0.0f, 0.0f, 0.0f};
     agent->target->normal = (Vec3){0.0f, 0.0f, 0.0f};
