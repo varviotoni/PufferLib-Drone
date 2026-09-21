@@ -476,15 +476,14 @@ static void render_task(DroneEnv* env, Client* client) {
             DrawRing3D(state->ring_buffer[i], 0.1f, GREEN, BLUE);
     } else if (env->task == TASK_AVOID && env->task_state != NULL) {
         AvoidState* state = (AvoidState*)env->task_state;
-        int sel = client->selected_drone;
-        if (sel >= 0 && sel < env->num_agents) {
-            TowerObstacle t = state->towers[sel];
+        for (int k = 0; k < NUM_AVOID_TOWERS; k++) {
+            TowerObstacle t = state->towers[k];
             DrawCylinderEx((Vector3){t.pos.x, t.pos.y, t.z_min},
                            (Vector3){t.pos.x, t.pos.y, t.z_max},
-                           t.radius, t.radius, 32, (Color){200, 45, 45, 180});
+                           t.radius, t.radius, 24, (Color){200, 45, 45, 180});
             DrawCylinderWiresEx((Vector3){t.pos.x, t.pos.y, t.z_min},
                                 (Vector3){t.pos.x, t.pos.y, t.z_max},
-                                t.radius, t.radius, 16, MAROON);
+                                t.radius, t.radius, 12, MAROON);
         }
     }
 }
@@ -721,8 +720,12 @@ void puf_render(DroneEnv* env) {
             if (sel >= 0 && sel < env->num_agents) {
                 DrawText(TextFormat("Collisions: %.0f", astate->collisions[sel]), 10, y, 18, astate->collided[sel] ? RED : WHITE);
                 y += 20;
-                float d_xy = hypotf(agent->state.pos.x - astate->towers[sel].pos.x, agent->state.pos.y - astate->towers[sel].pos.y);
-                DrawText(TextFormat("Dist to Tower: %.2f m", d_xy), 10, y, 18, WHITE);
+                float min_d = 1e9f;
+                for (int k = 0; k < NUM_AVOID_TOWERS; k++) {
+                    float d = hypotf(agent->state.pos.x - astate->towers[k].pos.x, agent->state.pos.y - astate->towers[k].pos.y);
+                    if (d < min_d) min_d = d;
+                }
+                DrawText(TextFormat("Dist to Nearest Tower: %.2f m", min_d), 10, y, 18, WHITE);
                 y += 20;
             }
         }

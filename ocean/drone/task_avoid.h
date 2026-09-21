@@ -1,6 +1,8 @@
 #pragma once
 #include "drone.h"
 
+#define NUM_AVOID_TOWERS 10
+
 #define AVOID_SCORE_DIST_SCALE 0.01f
 #define AVOID_SCORE_VEL_SCALE 0.01f
 #define AVOID_SCORE_OMEGA_SCALE 0.01f
@@ -8,12 +10,13 @@
 typedef struct {
     Vec3 pos;       // Center (x, y, 0)
     float radius;   // Radius of cylinder
-    float z_min;    // Floor (-MARGIN_Z or -GRID_Z)
-    float z_max;    // Ceiling (MARGIN_Z or GRID_Z)
+    float z_min;    // Floor (-GRID_Z)
+    float z_max;    // Ceiling (GRID_Z)
 } TowerObstacle;
 
 typedef struct {
     float tower_radius;
+    float circle_radius;
     float collision_penalty;
     float safety_margin;
     float alpha_proximity;
@@ -24,7 +27,7 @@ typedef struct {
 } AvoidConfig;
 
 typedef struct {
-    TowerObstacle* towers; // 1 tower per agent: towers[idx]
+    TowerObstacle towers[NUM_AVOID_TOWERS]; // 10 towers in circle formation in the middle
     bool* collided;
     float* score;
     float* perf;
@@ -37,8 +40,25 @@ typedef struct {
 // lifecycle
 
 static void avoid_init(DroneEnv* env) {
+    AvoidConfig* cfg = (AvoidConfig*)env->task_config;
     AvoidState* state = (AvoidState*)calloc(1, sizeof(AvoidState));
-    state->towers = (TowerObstacle*)calloc(env->num_agents, sizeof(TowerObstacle));
+
+    float c_radius = (cfg->circle_radius > 0.1f) ? cfg->circle_radius : 3.0f;
+    float t_radius = (cfg->tower_radius > 0.05f) ? cfg->tower_radius : 0.45f;
+
+    // Place 10 towers in a circle formation in the middle of the arena
+    for (int k = 0; k < NUM_AVOID_TOWERS; k++) {
+        float angle = (2.0f * (float)M_PI * (float)k) / (float)NUM_AVOID_TOWERS;
+        state->towers[k].pos = (Vec3){
+            c_radius * cosf(angle),
+            c_radius * sinf(angle),
+            0.0f
+        };
+        state->towers[k].radius = t_radius;
+        state->towers[k].z_min = -GRID_Z;
+        state->towers[k].z_max = GRID_Z;
+    }
+
     state->collided = (bool*)calloc(env->num_agents, sizeof(bool));
     state->score = (float*)calloc(env->num_agents, sizeof(float));
     state->perf = (float*)calloc(env->num_agents, sizeof(float));
@@ -52,7 +72,6 @@ static void avoid_init(DroneEnv* env) {
 static void avoid_close(DroneEnv* env) {
     AvoidState* state = (AvoidState*)env->task_state;
     if (state != NULL) {
-        free(state->towers);
         free(state->collided);
         free(state->score);
         free(state->perf);
@@ -65,55 +84,44 @@ static void avoid_close(DroneEnv* env) {
     free(env->task_config);
 }
 
-// Reset: place goal, start drone, and place full-height tower obstacle in between
+// Reset: spawn drone outside the circle, goal placed either across the circle or inside it
 static void avoid_reset(DroneEnv* env, Drone* agent, int idx) {
-    AvoidConfig* cfg = (AvoidConfig*)env->task_config;
     AvoidState* state = (AvoidState*)env->task_state;
 
-    Vec3 target = random_pos(&env->rng);
-    agent->target->pos = target;
-    agent->target->vel = (Vec3){0.0f, 0.0f, 0.0f};
-    agent->target->normal = (Vec3){0.0f, 0.0f, 0.0f};
+    // Drone spawns outside the circle at radius ~4.2m
+    float phi = rndf(0.0f, 2.0f * (float)M_PI, &env->rng);
+    float r_start = rndf(3.8f, 5.2f, &env->rng);
+    float z_start = rndf(-MARGIN_Z * 0.6f, MARGIN_Z * 0.6f, &env->rng);
 
-    // Starting position of drone at distance cfg->target_dist from target
-    Vec3 p = add3(target, random_ball_offset(&env->rng, cfg->target_dist));
     agent->state.pos = (Vec3){
-        clampf(p.x, -MARGIN_X, MARGIN_X),
-        clampf(p.y, -MARGIN_Y, MARGIN_Y),
-        clampf(p.z, -MARGIN_Z, MARGIN_Z),
+        clampf(r_start * cosf(phi), -MARGIN_X, MARGIN_X),
+        clampf(r_start * sinf(phi), -MARGIN_Y, MARGIN_Y),
+        clampf(z_start, -MARGIN_Z, MARGIN_Z),
     };
 
-    // Place full-height tower obstacle between start and target
-    Vec3 start = agent->state.pos;
-    Vec3 goal = target;
-
-    // Segment midpoint with randomization
-    float alpha = rndf(0.35f, 0.65f, &env->rng);
-    Vec3 mid = (Vec3){
-        start.x + alpha * (goal.x - start.x),
-        start.y + alpha * (goal.y - start.y),
-        0.0f
-    };
-
-    // Add lateral jitter perpendicular to flight trajectory
-    float dx = goal.x - start.x;
-    float dy = goal.y - start.y;
-    float len_xy = sqrtf(dx * dx + dy * dy);
-    if (len_xy > 0.01f) {
-        float perp_x = -dy / len_xy;
-        float perp_y = dx / len_xy;
-        float jitter = rndf(-0.5f, 0.5f, &env->rng);
-        mid.x += perp_x * jitter;
-        mid.y += perp_y * jitter;
+    // Goal: 80% on opposite side of circle (requiring traversing the pillar ring), 20% in center
+    float goal_mode = rndf(0.0f, 1.0f, &env->rng);
+    float z_goal = rndf(-MARGIN_Z * 0.6f, MARGIN_Z * 0.6f, &env->rng);
+    if (goal_mode < 0.8f) {
+        float phi_goal = phi + (float)M_PI + rndf(-0.5f, 0.5f, &env->rng);
+        float r_goal = rndf(3.8f, 5.2f, &env->rng);
+        agent->target->pos = (Vec3){
+            clampf(r_goal * cosf(phi_goal), -MARGIN_X, MARGIN_X),
+            clampf(r_goal * sinf(phi_goal), -MARGIN_Y, MARGIN_Y),
+            clampf(z_goal, -MARGIN_Z, MARGIN_Z),
+        };
+    } else {
+        float phi_goal = rndf(0.0f, 2.0f * (float)M_PI, &env->rng);
+        float r_goal = rndf(0.0f, 1.2f, &env->rng);
+        agent->target->pos = (Vec3){
+            r_goal * cosf(phi_goal),
+            r_goal * sinf(phi_goal),
+            clampf(z_goal, -MARGIN_Z, MARGIN_Z),
+        };
     }
 
-    mid.x = clampf(mid.x, -MARGIN_X, MARGIN_X);
-    mid.y = clampf(mid.y, -MARGIN_Y, MARGIN_Y);
-
-    state->towers[idx].pos = (Vec3){mid.x, mid.y, 0.0f};
-    state->towers[idx].radius = cfg->tower_radius > 0.0f ? cfg->tower_radius : 0.5f;
-    state->towers[idx].z_min = -GRID_Z;
-    state->towers[idx].z_max = GRID_Z;
+    agent->target->vel = (Vec3){0.0f, 0.0f, 0.0f};
+    agent->target->normal = (Vec3){0.0f, 0.0f, 0.0f};
     state->collided[idx] = false;
 
     float dist = norm3(sub3(agent->target->pos, agent->state.pos));
@@ -130,25 +138,34 @@ static void avoid_reset(DroneEnv* env, Drone* agent, int idx) {
 static float avoid_reward(DroneEnv* env, Drone* agent, int idx, StepCache* cache) {
     AvoidConfig* cfg = (AvoidConfig*)env->task_config;
     AvoidState* state = (AvoidState*)env->task_state;
-    TowerObstacle* tower = &state->towers[idx];
 
-    // Distance in XY plane to vertical cylinder centerline
-    float d_xy = hypotf(agent->state.pos.x - tower->pos.x, agent->state.pos.y - tower->pos.y);
+    // Find nearest of the 10 towers in the circle
+    float min_d_xy = 1e9f;
+    int closest = 0;
+    for (int k = 0; k < NUM_AVOID_TOWERS; k++) {
+        float d = hypotf(agent->state.pos.x - state->towers[k].pos.x,
+                         agent->state.pos.y - state->towers[k].pos.y);
+        if (d < min_d_xy) {
+            min_d_xy = d;
+            closest = k;
+        }
+    }
+
     float drone_radius = 0.15f;
-    float collision_dist = tower->radius + drone_radius;
+    float collision_dist = state->towers[closest].radius + drone_radius;
 
     float reward = 0.0f;
 
-    // Check collision
-    if (d_xy <= collision_dist) {
+    // Check collision with any tower
+    if (min_d_xy <= collision_dist) {
         state->collided[idx] = true;
         state->collisions[idx] += 1.0f;
         reward -= cfg->collision_penalty;
     } else {
-        // Soft proximity penalty when entering safety zone
+        // Soft proximity penalty if entering safety margin of nearest tower
         float safe_zone = collision_dist + cfg->safety_margin;
-        if (d_xy < safe_zone && cfg->safety_margin > 0.001f) {
-            float pen = (safe_zone - d_xy) / cfg->safety_margin;
+        if (min_d_xy < safe_zone && cfg->safety_margin > 0.001f) {
+            float pen = (safe_zone - min_d_xy) / cfg->safety_margin;
             reward -= cfg->alpha_proximity * pen * pen;
         }
 
@@ -167,7 +184,7 @@ static float avoid_reward(DroneEnv* env, Drone* agent, int idx, StepCache* cache
     state->ema_vel[idx] = 0.99f * state->ema_vel[idx] + 0.01f * cache->vel;
     state->ema_omega[idx] = 0.99f * state->ema_omega[idx] + 0.01f * cache->omega;
 
-    if (cache->dist > cfg->target_dist + 1.5f) {
+    if (out_of_bounds(agent->state.pos, 1.0f)) {
         reward -= env->oob_penalty;
     }
 
@@ -183,7 +200,7 @@ static bool avoid_done(DroneEnv* env, Drone* agent, int idx, StepCache* cache) {
         return true;
     }
 
-    return cache->dist > (cfg->target_dist + 1.5f) || agent->episode_length >= cfg->horizon;
+    return out_of_bounds(agent->state.pos, 1.0f) || agent->episode_length >= cfg->horizon;
 }
 
 static void avoid_log(DroneEnv* env, Drone* agent, int idx, Log* log, StepCache* cache) {

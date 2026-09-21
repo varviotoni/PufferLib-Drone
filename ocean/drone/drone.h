@@ -105,6 +105,7 @@ struct Env {
     float race_alpha_dist;
     int race_horizon;
     float avoid_tower_radius;
+    float avoid_circle_radius;
     float avoid_collision_penalty;
     float avoid_safety_margin;
     float avoid_alpha_proximity;
@@ -158,8 +159,22 @@ void reset_agent(DroneEnv* env, int idx) {
 void compute_observations(DroneEnv* env) {
     AvoidState* avoid_state = (env->task == TASK_AVOID && env->task_state) ? (AvoidState*)env->task_state : NULL;
     for (int i = 0; i < env->num_agents; i++) {
-        Vec3 tower_pos = (avoid_state) ? avoid_state->towers[i].pos : (Vec3){0, 0, 0};
-        float tower_rad = (avoid_state) ? avoid_state->towers[i].radius : 0.0f;
+        Vec3 tower_pos = (Vec3){0, 0, 0};
+        float tower_rad = 0.0f;
+        if (avoid_state) {
+            float min_d = 1e9f;
+            int closest = 0;
+            for (int k = 0; k < NUM_AVOID_TOWERS; k++) {
+                float d = hypotf(env->drones[i].state.pos.x - avoid_state->towers[k].pos.x,
+                                 env->drones[i].state.pos.y - avoid_state->towers[k].pos.y);
+                if (d < min_d) {
+                    min_d = d;
+                    closest = k;
+                }
+            }
+            tower_pos = avoid_state->towers[closest].pos;
+            tower_rad = avoid_state->towers[closest].radius;
+        }
         compute_drone_observations(&env->drones[i],
             env->agents[i].observations, (int)env->task, tower_pos, tower_rad);
     }
@@ -264,6 +279,7 @@ static void drone_fill_task_config(DroneEnv* env) {
     } else if (env->task == TASK_AVOID) {
         AvoidConfig* cfg = (AvoidConfig*)calloc(1, sizeof(AvoidConfig));
         cfg->tower_radius = env->avoid_tower_radius;
+        cfg->circle_radius = env->avoid_circle_radius;
         cfg->collision_penalty = env->avoid_collision_penalty;
         cfg->safety_margin = env->avoid_safety_margin;
         cfg->alpha_proximity = env->avoid_alpha_proximity;
@@ -344,6 +360,7 @@ void puf_init(Env* env, Dict* kwargs) {
     env->race_horizon = (int)dict_get(kwargs, "race_horizon");
 
     env->avoid_tower_radius = dict_get(kwargs, "tower_radius");
+    env->avoid_circle_radius = dict_get(kwargs, "circle_radius");
     env->avoid_collision_penalty = dict_get(kwargs, "collision_penalty");
     env->avoid_safety_margin = dict_get(kwargs, "safety_margin");
     env->avoid_alpha_proximity = dict_get(kwargs, "alpha_proximity");
