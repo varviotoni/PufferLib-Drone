@@ -537,6 +537,10 @@ void puf_render(DroneEnv* env) {
         }
     }
 
+    if (IsKeyPressed(KEY_R)) {
+        puf_reset(env);
+    }
+
     // Update camera position every frame when in follow mode
     if (client->follow_mode) {
         update_camera_position(client, drone_pos);
@@ -737,6 +741,8 @@ void puf_render(DroneEnv* env) {
     DrawText("Mouse wheel: Zoom in/out", 10, y, 16, LIGHTGRAY);
     y += 18;
     DrawText("Tab: Next task (hover/race/sphere/cube/flag/avoid)", 10, y, 16, LIGHTGRAY);
+    y += 18;
+    DrawText("R: Randomize / Reset course", 10, y, 16, LIGHTGRAY);
     y += 18;
     DrawText(TextFormat("I: Inspect mode [%s]", inspect_mode ? "ON" : "OFF"), 10, y, 16,
              inspect_mode ? PUFF_GREEN : LIGHTGRAY);

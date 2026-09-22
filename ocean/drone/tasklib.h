@@ -42,6 +42,7 @@ void task_close(DroneEnv* env) {
 void task_env_reset(DroneEnv* env) {
     switch (env->task) {
         case TASK_RACE: race_env_reset(env); break;
+        case TASK_AVOID: avoid_env_reset(env); break;
         default: break;
     }
 }

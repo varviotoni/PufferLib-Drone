@@ -105,8 +105,8 @@ struct Env {
     float race_alpha_dist;
     int race_horizon;
     float avoid_tower_radius;
-    float avoid_center_tower_radius;
-    float avoid_circle_radius;
+    float avoid_line_spacing;
+    float avoid_tower_spacing;
     float avoid_collision_penalty;
     float avoid_safety_margin;
     float avoid_alpha_proximity;
@@ -280,8 +280,8 @@ static void drone_fill_task_config(DroneEnv* env) {
     } else if (env->task == TASK_AVOID) {
         AvoidConfig* cfg = (AvoidConfig*)calloc(1, sizeof(AvoidConfig));
         cfg->tower_radius = env->avoid_tower_radius;
-        cfg->center_tower_radius = env->avoid_center_tower_radius;
-        cfg->circle_radius = env->avoid_circle_radius;
+        cfg->line_spacing = env->avoid_line_spacing;
+        cfg->tower_spacing = env->avoid_tower_spacing;
         cfg->collision_penalty = env->avoid_collision_penalty;
         cfg->safety_margin = env->avoid_safety_margin;
         cfg->alpha_proximity = env->avoid_alpha_proximity;
@@ -361,12 +361,19 @@ void puf_init(Env* env, Dict* kwargs) {
     env->race_alpha_dist = dict_get(kwargs, "race_alpha_dist");
     env->race_horizon = (int)dict_get(kwargs, "race_horizon");
 
-    env->avoid_tower_radius = dict_get(kwargs, "tower_radius");
-    env->avoid_center_tower_radius = dict_get(kwargs, "center_tower_radius");
-    env->avoid_circle_radius = dict_get(kwargs, "circle_radius");
-    env->avoid_collision_penalty = dict_get(kwargs, "collision_penalty");
-    env->avoid_safety_margin = dict_get(kwargs, "safety_margin");
-    env->avoid_alpha_proximity = dict_get(kwargs, "alpha_proximity");
+    DictItem* di = NULL;
+    di = dict_find(kwargs, "tower_radius");
+    env->avoid_tower_radius = di ? di->value : 0.45f;
+    di = dict_find(kwargs, "line_spacing");
+    env->avoid_line_spacing = di ? di->value : 2.5f;
+    di = dict_find(kwargs, "tower_spacing");
+    env->avoid_tower_spacing = di ? di->value : 3.0f;
+    di = dict_find(kwargs, "collision_penalty");
+    env->avoid_collision_penalty = di ? di->value : 5.0f;
+    di = dict_find(kwargs, "safety_margin");
+    env->avoid_safety_margin = di ? di->value : 0.15f;
+    di = dict_find(kwargs, "alpha_proximity");
+    env->avoid_alpha_proximity = di ? di->value : 0.15f;
     env->avoid_target_dist = dict_get(kwargs, "hover_target_dist");
     env->avoid_alpha_dist = dict_get(kwargs, "hover_alpha_dist");
     env->avoid_alpha_hover = dict_get(kwargs, "alpha_hover");

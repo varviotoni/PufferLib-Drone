@@ -1,7 +1,7 @@
 #pragma once
 #include "drone.h"
 
-#define NUM_AVOID_TOWERS 11
+#define NUM_AVOID_TOWERS 26
 
 #define AVOID_SCORE_DIST_SCALE 0.01f
 #define AVOID_SCORE_VEL_SCALE 0.01f
@@ -16,8 +16,8 @@ typedef struct {
 
 typedef struct {
     float tower_radius;
-    float center_tower_radius;
-    float circle_radius;
+    float line_spacing;
+    float tower_spacing;
     float collision_penalty;
     float safety_margin;
     float alpha_proximity;
@@ -28,7 +28,7 @@ typedef struct {
 } AvoidConfig;
 
 typedef struct {
-    TowerObstacle towers[NUM_AVOID_TOWERS]; // 10 towers in circle formation in the middle
+    TowerObstacle towers[NUM_AVOID_TOWERS]; // 4 staggered lines of towers in the middle (7-6-7-6)
     bool* collided;
     float* score;
     float* perf;
@@ -40,34 +40,92 @@ typedef struct {
 
 // lifecycle
 
-static void avoid_init(DroneEnv* env) {
+static void avoid_generate_towers(DroneEnv* env) {
     AvoidConfig* cfg = (AvoidConfig*)env->task_config;
-    AvoidState* state = (AvoidState*)calloc(1, sizeof(AvoidState));
+    AvoidState* state = (AvoidState*)env->task_state;
 
-    float c_radius = (cfg->circle_radius > 0.1f) ? cfg->circle_radius : 3.0f;
-    float t_radius = (cfg->tower_radius > 0.05f) ? cfg->tower_radius : 0.45f;
+    float x_dist = (cfg->line_spacing > 0.1f) ? cfg->line_spacing : 2.5f;
+    float y_dist = (cfg->tower_spacing > 0.1f) ? cfg->tower_spacing : 3.0f;
+    float base_radius = (cfg->tower_radius > 0.05f) ? cfg->tower_radius : 0.45f;
 
-    float center_r = (cfg->center_tower_radius > 0.05f) ? cfg->center_tower_radius : 0.8f;
+    // Adaptive jitter along Y to ensure adjacent towers always have clearance
+    float max_yjitter = fmaxf(0.05f, (y_dist - 2.0f * base_radius) * 0.35f);
+    float max_xjitter = 0.35f;
 
-    // Central tower right in the middle at (0, 0)
-    state->towers[0].pos = (Vec3){0.0f, 0.0f, 0.0f};
-    state->towers[0].radius = center_r;
-    state->towers[0].z_min = -GRID_Z;
-    state->towers[0].z_max = GRID_Z;
+    int idx = 0;
 
-    // 10 surrounding towers in a circular ring formation
-    int num_ring_towers = 10;
-    for (int k = 0; k < num_ring_towers; k++) {
-        float angle = (2.0f * (float)M_PI * (float)k) / (float)num_ring_towers;
-        state->towers[k + 1].pos = (Vec3){
-            c_radius * cosf(angle),
-            c_radius * sinf(angle),
-            0.0f
-        };
-        state->towers[k + 1].radius = t_radius;
-        state->towers[k + 1].z_min = -GRID_Z;
-        state->towers[k + 1].z_max = GRID_Z;
+    // Line 1: 7 towers at X ≈ -x_dist (randomized X wobble and Y position)
+    for (int j = -3; j <= 3; j++) {
+        float x = -x_dist + rndf(-max_xjitter, max_xjitter, &env->rng);
+        float y;
+        if (j == -3) {
+            y = -MARGIN_Y + rndf(0.0f, 0.2f, &env->rng);
+        } else if (j == 3) {
+            y = MARGIN_Y - rndf(0.0f, 0.2f, &env->rng);
+        } else {
+            y = (float)j * y_dist + rndf(-max_yjitter, max_yjitter, &env->rng);
+        }
+        float r = base_radius * rndf(0.9f, 1.1f, &env->rng);
+        state->towers[idx].pos = (Vec3){x, clampf(y, -MARGIN_Y, MARGIN_Y), 0.0f};
+        state->towers[idx].radius = r;
+        state->towers[idx].z_min = -GRID_Z;
+        state->towers[idx].z_max = GRID_Z;
+        idx++;
     }
+
+    // Line 2: 6 towers at X ≈ 0.0, Y staggered by y_dist / 2 (randomized)
+    for (int j = -2; j <= 3; j++) {
+        float x = rndf(-max_xjitter, max_xjitter, &env->rng);
+        float y = ((float)j - 0.5f) * y_dist + rndf(-max_yjitter, max_yjitter, &env->rng);
+        float r = base_radius * rndf(0.9f, 1.1f, &env->rng);
+        state->towers[idx].pos = (Vec3){x, clampf(y, -MARGIN_Y, MARGIN_Y), 0.0f};
+        state->towers[idx].radius = r;
+        state->towers[idx].z_min = -GRID_Z;
+        state->towers[idx].z_max = GRID_Z;
+        idx++;
+    }
+
+    // Line 3: 7 towers at X ≈ +x_dist (randomized)
+    for (int j = -3; j <= 3; j++) {
+        float x = x_dist + rndf(-max_xjitter, max_xjitter, &env->rng);
+        float y;
+        if (j == -3) {
+            y = -MARGIN_Y + rndf(0.0f, 0.2f, &env->rng);
+        } else if (j == 3) {
+            y = MARGIN_Y - rndf(0.0f, 0.2f, &env->rng);
+        } else {
+            y = (float)j * y_dist + rndf(-max_yjitter, max_yjitter, &env->rng);
+        }
+        float r = base_radius * rndf(0.9f, 1.1f, &env->rng);
+        state->towers[idx].pos = (Vec3){x, clampf(y, -MARGIN_Y, MARGIN_Y), 0.0f};
+        state->towers[idx].radius = r;
+        state->towers[idx].z_min = -GRID_Z;
+        state->towers[idx].z_max = GRID_Z;
+        idx++;
+    }
+
+    // Line 4: 6 towers at X ≈ +2.0*x_dist, Y staggered by y_dist / 2 (randomized)
+    for (int j = -2; j <= 3; j++) {
+        float x = 2.0f * x_dist + rndf(-max_xjitter, max_xjitter, &env->rng);
+        float y = ((float)j - 0.5f) * y_dist + rndf(-max_yjitter, max_yjitter, &env->rng);
+        float r = base_radius * rndf(0.9f, 1.1f, &env->rng);
+        state->towers[idx].pos = (Vec3){x, clampf(y, -MARGIN_Y, MARGIN_Y), 0.0f};
+        state->towers[idx].radius = r;
+        state->towers[idx].z_min = -GRID_Z;
+        state->towers[idx].z_max = GRID_Z;
+        idx++;
+    }
+}
+
+static void avoid_env_reset(DroneEnv* env) {
+    avoid_generate_towers(env);
+}
+
+static void avoid_init(DroneEnv* env) {
+    AvoidState* state = (AvoidState*)calloc(1, sizeof(AvoidState));
+    env->task_state = state;
+
+    avoid_generate_towers(env);
 
     state->collided = (bool*)calloc(env->num_agents, sizeof(bool));
     state->score = (float*)calloc(env->num_agents, sizeof(float));
@@ -76,7 +134,6 @@ static void avoid_init(DroneEnv* env) {
     state->ema_dist = (float*)calloc(env->num_agents, sizeof(float));
     state->ema_vel = (float*)calloc(env->num_agents, sizeof(float));
     state->ema_omega = (float*)calloc(env->num_agents, sizeof(float));
-    env->task_state = state;
 }
 
 static void avoid_close(DroneEnv* env) {
@@ -94,33 +151,48 @@ static void avoid_close(DroneEnv* env) {
     free(env->task_config);
 }
 
-// Reset: spawn drone outside the column ring, goal always on opposite side of column ring
+// Reset: spawn drone on one side of the lines, goal on opposite side of the lines
 static void avoid_reset(DroneEnv* env, Drone* agent, int idx) {
     AvoidConfig* cfg = (AvoidConfig*)env->task_config;
     AvoidState* state = (AvoidState*)env->task_state;
 
-    float ring_outer = (cfg->circle_radius > 0.1f ? cfg->circle_radius : 3.0f) +
-                       (cfg->tower_radius > 0.05f ? cfg->tower_radius : 0.45f);
+    if (env->num_agents == 1) {
+        avoid_generate_towers(env);
+    }
 
-    // Drone spawns outside the column ring
-    float phi = rndf(0.0f, 2.0f * (float)M_PI, &env->rng);
-    float r_start = rndf(ring_outer + 0.8f, ring_outer + 2.2f, &env->rng);
-    float z_start = rndf(-MARGIN_Z * 0.6f, MARGIN_Z * 0.6f, &env->rng);
+    float x_dist = (cfg->line_spacing > 0.1f) ? cfg->line_spacing : 2.5f;
+
+    // Randomize travel direction: 50% left-to-right (-X to +X), 50% right-to-left (+X to -X)
+    bool left_to_right = (rndf(0.0f, 1.0f, &env->rng) < 0.5f);
+
+    // Negative side: before Line 1 (at -x_dist)
+    float x_neg = rndf(-MARGIN_X + 1.0f, -x_dist - 2.5f, &env->rng);
+    // Positive side: after Line 4 (at +2.0*x_dist)
+    float x_pos = rndf(2.0f * x_dist + 1.8f, MARGIN_X - 0.8f, &env->rng);
+
+    float x_start = left_to_right ? x_neg : x_pos;
+    float x_goal  = left_to_right ? x_pos : x_neg;
+
+    // Y spans across the obstacle channel [-4.5m, 4.5m]
+    float y_start = rndf(-4.5f, 4.5f, &env->rng);
+    float y_goal  = rndf(-4.5f, 4.5f, &env->rng);
+
+    // Z within normal arena flight height
+    float z_start = rndf(-MARGIN_Z * 0.5f, MARGIN_Z * 0.5f, &env->rng);
+    float z_goal  = rndf(-MARGIN_Z * 0.5f, MARGIN_Z * 0.5f, &env->rng);
 
     agent->state.pos = (Vec3){
-        clampf(r_start * cosf(phi), -MARGIN_X, MARGIN_X),
-        clampf(r_start * sinf(phi), -MARGIN_Y, MARGIN_Y),
+        clampf(x_start, -MARGIN_X, MARGIN_X),
+        clampf(y_start, -MARGIN_Y, MARGIN_Y),
         clampf(z_start, -MARGIN_Z, MARGIN_Z),
     };
 
-    // Goal is placed at the opposite side of the column ring
-    float phi_goal = phi + (float)M_PI + rndf(-0.35f, 0.35f, &env->rng);
-    float r_goal = rndf(ring_outer + 0.8f, ring_outer + 2.2f, &env->rng);
-    float z_goal = rndf(-MARGIN_Z * 0.6f, MARGIN_Z * 0.6f, &env->rng);
+    // Face towards the goal
+    agent->state.quat = left_to_right ? (Quat){1.0f, 0.0f, 0.0f, 0.0f} : (Quat){0.0f, 0.0f, 0.0f, 1.0f};
 
     agent->target->pos = (Vec3){
-        clampf(r_goal * cosf(phi_goal), -MARGIN_X, MARGIN_X),
-        clampf(r_goal * sinf(phi_goal), -MARGIN_Y, MARGIN_Y),
+        clampf(x_goal, -MARGIN_X, MARGIN_X),
+        clampf(y_goal, -MARGIN_Y, MARGIN_Y),
         clampf(z_goal, -MARGIN_Z, MARGIN_Z),
     };
 
@@ -143,7 +215,7 @@ static float avoid_reward(DroneEnv* env, Drone* agent, int idx, StepCache* cache
     AvoidConfig* cfg = (AvoidConfig*)env->task_config;
     AvoidState* state = (AvoidState*)env->task_state;
 
-    // Find nearest of the 10 towers in the circle
+    // Find nearest of the 26 towers in the 4 staggered lines
     float min_d_xy = 1e9f;
     int closest = 0;
     for (int k = 0; k < NUM_AVOID_TOWERS; k++) {

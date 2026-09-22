@@ -153,8 +153,10 @@ def main():
             print(f"    collision_penalty   = {get_env('collision_penalty'):<12} safety_margin      = {get_env('safety_margin')}")
             print(f"    alpha_proximity     = {get_env('alpha_proximity'):<12} alpha_vel          = {get_env('alpha_vel')}")
             print(f"    hover_alpha_dist    = {get_env('hover_alpha_dist'):<12} alpha_hover        = {get_env('alpha_hover')}")
-            print(f"    tower_radius        = {get_env('tower_radius'):<12} center_tower_radius= {get_env('center_tower_radius')}")
-            print(f"    circle_radius       = {get_env('circle_radius'):<12} oob_penalty        = {get_env('oob_penalty')}")
+            line_sp = get_env('line_spacing', get_env('center_tower_radius'))
+            tow_sp = get_env('tower_spacing', get_env('circle_radius'))
+            print(f"    tower_radius        = {get_env('tower_radius'):<12} line_spacing       = {line_sp}")
+            print(f"    tower_spacing       = {tow_sp:<12} oob_penalty        = {get_env('oob_penalty')}")
 
             print("  [PPO TRAINING HYPERPARAMETERS]")
             print(f"    learning_rate       = {get_trn('learning_rate'):<12} gamma              = {get_trn('gamma')}")
